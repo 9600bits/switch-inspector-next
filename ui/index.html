@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
+  <title>Switch Inspector · 巡检工作台</title>
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#workspace">跳转到工作区</a>
+  <div class="shell">
+    <aside class="sidebar">
+      <a href="#dashboard" class="brand" aria-label="Switch Inspector 首页"><span class="brand-mark" data-icon="network"></span><span>Switch<span class="brand-bottom">Inspector<span class="version">2.0</span></span></span></a>
+      <div class="workspace-label">本地工作空间 <span class="tiny-dot"></span></div>
+      <div class="nav-label">工作空间</div>
+      <nav aria-label="主导航">
+        <button class="nav-item active" data-nav="dashboard"><span data-icon="dashboard"></span><span>巡检工作台</span></button>
+        <button class="nav-item" data-nav="assets"><span data-icon="server"></span><span>资产管理</span><span class="nav-count" id="nav-count">0</span></button>
+        <button class="nav-item" data-nav="tasks"><span data-icon="activity"></span><span>巡检任务</span><span class="running-dot" id="running-dot" hidden></span></button>
+        <button class="nav-item" data-nav="reports"><span data-icon="folder"></span><span>报告与归档</span></button>
+      </nav>
+      <div class="nav-label second-label">偏好设置</div>
+      <button class="nav-item" data-nav="settings"><span data-icon="sliders"></span><span>巡检设置</span></button>
+      <div class="sidebar-bottom">
+        <div class="readonly-card"><span data-icon="shield"></span><strong>采集权限</strong><p>仅用户视图<br>固定只读命令</p><button id="safety-link">查看规则 <span data-icon="arrow-up-right"></span></button></div>
+        <button class="local-profile" id="data-info"><span class="avatar" data-icon="monitor"></span><span><strong>本机工作空间</strong><small>Windows · 本地存储</small></span><span data-icon="chevron-right"></span></button>
+      </div>
+    </aside>
+    <div class="app-body">
+      <header class="topbar"><div class="breadcrumb"><span data-icon="panel"></span><span>工作空间</span><span class="slash">/</span><strong id="breadcrumb-title">巡检工作台</strong></div><div class="topbar-actions"><span class="local-badge"><i></i>本地运行</span><button class="icon-button" id="help-button" aria-label="使用帮助" title="使用帮助" data-icon="help"></button><span class="top-divider"></span><button class="user-avatar" id="about-button" aria-label="关于应用">SI</button></div></header>
+      <div class="demo-banner" id="demo-banner" hidden><span><span data-icon="flask"></span>演示工作空间 <span class="banner-detail">· 以下为示例数据，不会连接真实设备</span></span><button id="exit-demo">进入我的工作空间 <span data-icon="arrow-right"></span></button></div>
+      <main id="workspace" tabindex="-1">
+        <div class="page-heading"><div><div class="eyebrow" id="eyebrow">NETWORK OPERATIONS / OVERVIEW</div><h1 id="page-title">巡检工作台</h1><p id="page-description">掌握设备运行状态，让每一次巡检都有据可查。</p></div><div class="heading-actions"><button class="button" id="heading-secondary"><span data-icon="upload"></span>导入资产</button><button class="button primary" id="start-button"><span data-icon="play"></span>开始巡检<span class="key-hint">↵</span></button></div></div>
+        <section class="stats-grid" id="stats-grid" aria-label="设备概览"></section>
+        <div id="page-content"></div>
+      <footer class="content-footer"><span>Switch Inspector</span><span id="footer-time"></span></footer>
+      </main>
+      <div class="statusbar"><span><i class="tiny-dot"></i><span id="status-label">工作空间已就绪</span></span><span><span data-icon="lock"></span>Windows 凭据保护<span class="status-divider">|</span>SSH / 只读采集<span class="status-divider">|</span>v2.0.0</span></div>
+    </div>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
+  <div id="toast" role="status" aria-live="polite"></div>
+</body>
+</html>
