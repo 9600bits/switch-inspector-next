@@ -23,6 +23,12 @@ def result(device):
     return Collection(device.host, device.vendor, outputs={
         "display cpu-usage": "CPU usage: 12%", "display memory-usage": "Memory usage: 36%",
         "display device": "FAN1 Present FAN Normal\nPWR1 Present POWER Normal",
+        "display environment": "1 sensor NORMAL 40 60 75",
+        "display interface brief": "GE1/0/1 up up\nGE1/0/2 down down",
+        "display alarm active": "No active alarms",
+        "display logbuffer": "Logging buffer configuration and contents: Current messages: 0",
+        "display counters errors inbound": "GE1/0/1 0 0",
+        "display counters errors outbound": "GE1/0/1 0 0",
         "display current-configuration": "<script>unsafe</script>\n" + device.username + " " + device.password})
 
 
@@ -74,6 +80,11 @@ class BackendTests(unittest.TestCase):
         restarted = Api(self.temp.name)
         self.assertEqual(restarted.snapshot()["assets"][0]["result"]["status"], "ok")
         self.assertIn("display current-configuration", restarted.get_result("192.0.2.1")["outputs"])
+        overview = self.api.get_report(self.api._run["id"])
+        self.assertNotIn(asset()["password"], json.dumps(overview))
+        self.assertNotIn(asset()["username"], json.dumps(overview))
+        self.assertNotIn("outputs", overview["devices"][0])
+        self.assertEqual(overview["counts"]["ok"], 1)
         self.assertNotIn("outputs", self.api.snapshot()["run"]["results"][0])
 
     def test_cidr_duplicate_limit_and_validation(self):

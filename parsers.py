@@ -16,7 +16,7 @@ class ParseError(ValueError):
 # ---------------- 版本 / 运行时间（华为、华三通用） ----------------
 _VERSION_RE = re.compile(r"Version\s+([^,\n]+)", re.I)
 _UPTIME_RE = re.compile(r"uptime is (.+)", re.I)
-_MODEL_RE = re.compile(r"(?:HUAWEI|H3C|HP)\s+([\w\-]+)\s+uptime", re.I)
+_MODEL_RE = re.compile(r"(?:HUAWEI|H3C|HP|Quidway)\s+([\w\-]+)(?:\s+Routing Switch)?\s+uptime", re.I)
 
 
 def parse_version(text):
@@ -58,6 +58,9 @@ def parse_memory_huawei(text):
     vals = [int(v) for v in _MEM_PCT_RE.findall(text)]
     if vals:
         return {"pct": max(vals)}
+    m = re.search(r"Memory\s+(?:Using|Usage)\s+Percentage\s*(?:Is|:|=)\s*(\d+(?:\.\d+)?)\s*%", text, re.I)
+    if m:
+        return {"pct": float(m.group(1))}
     raise ParseError("未找到内存占用率")
 
 
@@ -79,7 +82,7 @@ def parse_memory_h3c(text):
 _HW_ENV_RE = re.compile(
     r"^\s*(\S+)\s+(\S+)\s+(NORMAL|ABNORMAL)\s+(\d+)\s+", re.I | re.M)
 _H3C_ENV_RE = re.compile(
-    r"^\s*(\d+)\s+(\S+)\s+(-?\d+)\s+-?\d+\s+\d+\s+\d+\s*$", re.M)
+    r"^\s*(\d+)\s+(\S+)\s+(?:(NORMAL|ABNORMAL)\s+)?(-?\d+)\s+-?\d+\s+\d+\s+\d+(?:\s+\d+)?\s*$", re.M | re.I)
 
 
 def parse_env_huawei(text):
@@ -97,9 +100,9 @@ def parse_env_huawei(text):
 
 def parse_env_h3c(text):
     readings = []
-    for slot, sensor, temp in _H3C_ENV_RE.findall(text):
+    for slot, sensor, status, temp in _H3C_ENV_RE.findall(text):
         readings.append({"where": f"{slot}/{sensor}", "temp": int(temp),
-                         "abnormal": False})
+                         "abnormal": status.upper() == "ABNORMAL"})
     if not readings:
         raise ParseError("未找到温度传感器数据")
     return {"readings": readings}
@@ -152,12 +155,16 @@ def parse_alarm(text):
         line = line.strip()
         if not line or _INFO_LINE_RE.search(line):
             continue
+        if re.match(r"^(?:Index|ID|Level|Severity)\b", line, re.I):
+            continue
         if _ALARM_LINE_RE.search(line) or re.match(r"^\d+\s", line):
             entries.append(line)
-    return {"entries": entries[:50]}
+    if not entries and not re.search(r"(?:alarm.*(?:null|none|empty|0\b)|(?:no|zero)\s+(?:active\s+)?alarms?|没有.{0,8}告警|告警.*(?:为空|为0))", text, re.I):
+        raise ParseError("未识别到告警记录或明确的无告警标识")
+    return {"entries": entries[:50], "count": len(entries)}
 
 
-_LOG_SEV_RE = re.compile(r"/([1-7])/[A-Za-z][A-Za-z0-9_]*")
+_LOG_SEV_RE = re.compile(r"/([0-7])/[A-Za-z][A-Za-z0-9_]*")
 
 
 def parse_log(text, max_lines=50):
@@ -167,7 +174,9 @@ def parse_log(text, max_lines=50):
         m = _LOG_SEV_RE.search(line)
         if m and int(m.group(1)) <= 4:  # 1-4：critical/major/warning 级别
             flagged.append(line)
-    return {"flagged": flagged[-max_lines:]}
+    if not _LOG_SEV_RE.search(text) and not re.search(r"(?:current\s+(?:messages|records)\s*:\s*0\b|(?:no|zero)\s+logs?|(?:日志|记录).*(?:为空|为0))", text, re.I):
+        raise ParseError("未识别到日志格式或日志缓冲区标识")
+    return {"flagged": flagged[-max_lines:], "count": len(flagged)}
 
 
 # ---------------- 端口简表 ----------------
@@ -230,6 +239,8 @@ def parse_errors_table(text):
         if s > 0:
             bad.setdefault(port, 0)
             bad[port] += s
+    if not _ERR_ROW_RE.search(text):
+        raise ParseError("未识别到接口错包计数行")
     return bad
 
 

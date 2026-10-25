@@ -6,6 +6,9 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: 'unsafe-inline' 'unsafe-eval'; connect-src 'self'; img-src 'self' data:; object-src 'none'; base-uri 'none'">
   <title>Switch Inspector · 巡检工作台</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="report.css">
+  <script defer src="report-view.js"></script>
+  <script defer src="demo-report.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -37,7 +40,7 @@
         <div id="page-content"></div>
       <footer class="content-footer"><span>Switch Inspector</span><span id="footer-time"></span></footer>
       </main>
-      <div class="statusbar"><span><i class="tiny-dot"></i><span id="status-label">工作空间已就绪</span></span><span><span data-icon="lock"></span>Windows 凭据保护<span class="status-divider">|</span>SSH / 只读采集<span class="status-divider">|</span>v2.0.0</span></div>
+      <div class="statusbar"><span><i class="tiny-dot"></i><span id="status-label">工作空间已就绪</span></span><span><span data-icon="lock"></span>Windows 凭据保护<span class="status-divider">|</span>SSH 优先 / Telnet 回退<span class="status-divider">|</span>v2.0.0</span></div>
     </div>
   </div>
   <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>

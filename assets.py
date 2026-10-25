@@ -9,6 +9,29 @@ BRANDS = {"华为": "huawei", "huawei": "huawei", "华三": "hp_comware", "h3c":
 
 class AssetError(ValueError): pass
 
+def expand_range(value, limit=4096):
+    value = str(value).strip()
+    if "/" in value:
+        return expand_cidr(value, limit)
+    parts = value.split("-")
+    if len(parts) != 2:
+        raise AssetError("请输入 CIDR、192.168.1.1-10 或完整起止 IPv4 地址")
+    start, end = (part.strip() for part in parts)
+    if end.isascii() and end.isdecimal():
+        if not 0 <= int(end) <= 255:
+            raise AssetError("简写结束地址必须为0-255")
+        end = start.rsplit(".", 1)[0] + "." + end
+    try:
+        first, last = int(ipaddress.IPv4Address(start)), int(ipaddress.IPv4Address(end))
+    except ipaddress.AddressValueError:
+        raise AssetError("起止地址必须为有效 IPv4 地址")
+    if first > last:
+        raise AssetError("起始地址不能大于结束地址")
+    count = last - first + 1
+    if count > limit:
+        raise AssetError(f"范围包含 {count} 个地址，单次上限 {limit}")
+    return [str(ipaddress.IPv4Address(n)) for n in range(first, last + 1)]
+
 def expand_cidr(value, limit=4096):
     try: net = ipaddress.ip_network(value.strip(), strict=False)
     except ValueError as e: raise AssetError(f"无效 IPv4 网段: {e}")
@@ -39,7 +62,7 @@ def normalize(record):
 def write_template(path):
     wb = Workbook(); ws = wb.active; ws.title = "设备清单"; ws.append(HEADERS)
     ws.append(["核心交换机", "192.168.1.1", "华为", 22, "admin", "请替换为真实密码", "总部"])
-    info = wb.create_sheet("说明"); info.append(["每行一台设备；密码明文保存，请妥善保护。品牌可留空，填写时使用华为或H3C；开始巡检前需补充未指定设备的厂商。"])
+    info = wb.create_sheet("说明"); info.append(["每行一台设备；密码明文保存，请妥善保护。品牌可留空，登录后识别华为或H3C。SSH端口列为连接端口：先尝试SSH，登录失败后在同端口尝试Telnet（明文传输）。"])
     wb.save(path)
 
 def import_xlsx(path):

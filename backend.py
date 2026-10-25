@@ -1,6 +1,6 @@
 """Desktop bridge: assets, bounded scheduling and escaped, credential-free reports."""
 import copy
-import html
+import sys
 import json
 import os
 import threading
@@ -9,9 +9,10 @@ from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from datetime import datetime
 from pathlib import Path
 
-from assets import normalize, expand_cidr, import_xlsx, write_template, AssetError
+from assets import normalize, expand_cidr, expand_range, import_xlsx, write_template, AssetError
 from devices import Device
-from secure_collector import inspect, DEFAULT_COMMANDS, normalize_commands
+from secure_collector import inspect, DEFAULT_COMMANDS, ANALYSIS_COMMANDS, normalize_commands
+from reporting import analyze_device, build_report, render_body, render_document
 from vault import Vault
 import parsers
 
@@ -96,7 +97,8 @@ class Api:
             run["results"] = [{k: copy.deepcopy(v) for k, v in row.items() if k != "outputs"} for row in self._run["results"]]
             return {"assets": [dict(public(a), result=latest.get(a["host"])) for a in self._store.assets],
                     "history": copy.deepcopy(self._store.history[-100:][::-1]),
-                    "run": run, "commands": copy.deepcopy(self._commands), "data_dir": str(self._base)}
+                    "run": run, "commands": copy.deepcopy(self._commands),
+                    "analysis_commands": copy.deepcopy(ANALYSIS_COMMANDS), "data_dir": str(self._base)}
 
     def save_commands(self, vendor, commands):
         if vendor not in DEFAULT_COMMANDS:
@@ -155,6 +157,13 @@ class Api:
             addresses = expand_cidr(record.get("cidr", ""))
             items = [normalize(dict(record, host=ip, name=ip)) for ip in addresses]
             return self._merge(items)
+        except AssetError as exc:
+            return {"error": str(exc)}
+
+    def add_range(self, record):
+        try:
+            addresses = expand_range(record.get("range", ""))
+            return self._merge([normalize(dict(record, host=ip, name=ip)) for ip in addresses])
         except AssetError as exc:
             return {"error": str(exc)}
 
@@ -256,6 +265,15 @@ class Api:
                             console.update({"host": asset["host"], "name": asset.get("name", ""), "command": "",
                                             "status": "connecting", "output": "", "started": now,
                                             "finished": "", "error": ""})
+                            console["transport"] = payload.get("transport", "ssh")
+                        elif kind == "connection_fallback":
+                            message = scrub(payload.get("message", "SSH 登录失败，正在尝试 Telnet"))
+                            console.update({"status": "connecting", "transport": "telnet", "output": message})
+                            self._run["logs"].append({"time": datetime.now().strftime("%H:%M:%S"),
+                                "host": asset["host"], "status": "running", "message": message})
+                        elif kind == "pagination_fallback":
+                            self._run["logs"].append({"time": datetime.now().strftime("%H:%M:%S"),
+                                "host": asset["host"], "status": "running", "message": scrub(payload.get("message", ""))})
                         elif kind == "command_start":
                             console.update({"command": payload.get("command", ""), "status": "running",
                                             "output": "", "error": ""})
@@ -297,7 +315,7 @@ class Api:
                             now = datetime.now().isoformat()
                             self._run["consoles"][slot].update({"host": asset["host"], "name": asset.get("name", ""),
                                 "command": "", "status": "queued", "output": "", "started": now,
-                                "updated": now, "finished": "", "error": ""})
+                                "updated": now, "finished": "", "error": "", "transport": ""})
                             pending[pool.submit(invoke, asset, slot)] = (asset, slot)
                             self._run["active"].append(asset["host"])
 
@@ -318,17 +336,25 @@ class Api:
                                     self._run["consoles"][slot].update({"status": "fail", "finished": datetime.now().isoformat(),
                                                                          "updated": datetime.now().isoformat(), "error": error})
                         # Never expose an actual configured credential via output or errors.
+                        ssh_error = getattr(result, "ssh_error", "")
                         for secret in (asset["password"], asset["username"]):
                             if secret:
                                 outputs = {key: value.replace(secret, "[REDACTED]") for key, value in outputs.items()}
                                 error = error.replace(secret, "[REDACTED]")
+                                ssh_error = ssh_error.replace(secret, "[REDACTED]")
                         actual_vendor = getattr(result, "detected_vendor", "") or getattr(result, "vendor", "") or asset.get("vendor", "")
                         values = metrics(actual_vendor, outputs)
                         row = dict(public(asset), vendor=actual_vendor or asset.get("vendor", ""),
                                    detected_vendor=actual_vendor, model=getattr(result, "model", ""),
                                    version=getattr(result, "version", ""), uptime=getattr(result, "uptime", ""),
                                    serial_number=getattr(result, "serial_number", ""), metrics=values, status=health(values, failed),
-                                   error=error, outputs=outputs, collected=datetime.now().isoformat())
+                                   transport=getattr(result, "transport", ""), ssh_error=ssh_error,
+                                   pagination_mode=getattr(result, "pagination_mode", ""),
+                                   error=error, outputs=outputs, collected=datetime.now().isoformat(),
+                                   requested_commands=getattr(result, "requested_commands", []) or list(outputs),
+                                   command_status=getattr(result, "command_status", {}))
+                        row["analysis"] = analyze_device(row)
+                        row["status"] = row["analysis"]["status"]
                         if failed:
                             with self._lock:
                                 if slot < len(self._run.get("consoles", [])):
@@ -362,19 +388,14 @@ class Api:
         folder.mkdir(parents=True, exist_ok=True)
         rows = run["results"]
         (folder / "results.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
-        esc = html.escape
-        cards = []
         for row in rows:
             configuration = row["outputs"].get("display current-configuration")
             if configuration is not None:
                 (folder / f'{row["host"]}_current-configuration.txt').write_text(configuration, encoding="utf-8")
-            details = "".join(f"<details><summary>{esc(cmd)}</summary><pre>{esc(output)}</pre></details>" for cmd, output in row["outputs"].items())
-            labels = {"ok": "正常", "warn": "需关注", "fail": "采集失败", "unknown": "指标待核实"}
-            cards.append(f'<article><h2>{esc(row["name"])} <small>{esc(row["host"])}</small></h2><p>{labels[row["status"]]} · CPU {row["metrics"].get("cpu")} % · 内存 {row["metrics"].get("memory")} %</p><p>{esc(row["error"])}</p>{details}</article>')
-        content = '<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Switch Inspector 巡检报告</title><style>body{font:15px/1.7 "Segoe UI","Microsoft YaHei",sans-serif;background:#f4f7f8;color:#182a30;max-width:1040px;margin:48px auto;padding:0 24px}h1{font-size:30px}small{font-size:14px;color:#617278}article{background:white;border:1px solid #dce5e7;border-radius:12px;padding:24px;margin:20px 0}summary{cursor:pointer;padding:12px;background:#f2f6f6;margin-top:8px}pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:13px}</style>'
-        content += f'<h1>交换机巡检报告</h1><p>{esc(run["started"])} · 已采集 {len(rows)} / {run["total"]} 台 · {"任务已取消" if self._cancel_event.is_set() else "任务已完成"}</p>' + "".join(cards) + '</html>'
-        (folder / "report.html").write_text(content, encoding="utf-8")
         state = "cancelled" if self._cancel_event.is_set() else "done"
+        report = build_report(dict(run, state=state), rows)
+        resources = Path(getattr(sys, "_MEIPASS", Path(__file__).parent)) / "ui"
+        (folder / "report.html").write_text(render_document(report, rows, resources), encoding="utf-8")
         item = {"id": run["id"], "started": run["started"], "state": state, "count": len(rows), "total": run["total"],
                 "ok": sum(row["status"] == "ok" for row in rows), "warn": sum(row["status"] in ("warn", "unknown") for row in rows),
                 "fail": sum(row["status"] == "fail" for row in rows),
@@ -384,6 +405,23 @@ class Api:
             self._store.save()
             self._run["state"] = state
             self._run["finished"] = datetime.now().isoformat()
+
+    def get_report(self, run_id):
+        with self._lock:
+            item = next((copy.deepcopy(item) for item in self._store.history if item["id"] == run_id), None)
+        if not item:
+            return {"error": "报告不存在"}
+        try:
+            path = self._base / "reports" / item["id"] / "results.json"
+            rows = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            # Old history summaries can still be read when the raw archive was moved.
+            rows = item.get("results", [])
+        except (OSError, ValueError):
+            return {"error": "归档不可读取"}
+        report = build_report(item, rows)
+        report["html"] = render_body(report)
+        return report
 
     def open_report(self, run_id, folder=False):
         with self._lock:

@@ -52,6 +52,10 @@ with sync_playwright() as playwright:
 
     page.locator("[data-nav='assets']").click()
     page.locator("#add-button").click()
+    expect(page.locator("#asset-form [name='port']")).to_have_value("22")
+    expect(page.locator("#asset-form")).to_contain_text("先尝试 SSH，登录失败后在此端口尝试 Telnet")
+    expect(page.locator("#asset-form [name='protocol']")).to_have_count(0)
+    page.locator("#asset-form [name='port']").fill("2000")
     page.locator("#asset-form [name='name']").fill("NEW-H3C-TEST")
     page.locator("#asset-form [name='host']").fill("192.0.2.9")
     page.locator("#asset-form [name='vendor']").select_option("hp_comware")
@@ -63,6 +67,7 @@ with sync_playwright() as playwright:
     expect(page.locator(".device-name")).to_have_text("NEW-H3C-TEST")
     page.locator("[data-menu]").click()
     page.locator("#menu-edit").click()
+    expect(page.locator("#asset-form [name='port']")).to_have_value("2000")
     page.locator("#asset-form [name='name']").fill("EDITED-H3C-TEST")
     page.locator("#save-asset").click()
     page.locator("#asset-search").fill("EDITED-H3C")
@@ -97,15 +102,40 @@ with sync_playwright() as playwright:
 
     page.locator("#add-button").click()
     page.locator("#tab-cidr").click()
-    page.locator("#asset-form [name='cidr']").fill("192.0.2.0/30")
+    page.locator("#asset-form [name='range']").fill("192.0.2.0/30")
     page.locator("#asset-form [name='username']").fill("test-user")
     page.locator("#asset-form [name='password']").fill("test-password")
     page.locator("#save-asset").click()
     page.locator("#asset-search").fill("192.0.2.")
     expect(page.locator(".device-name")).to_have_count(2)
-    check("CIDR preview interaction and valid host expansion")
+    page.locator("#add-button").click()
+    page.locator("#tab-cidr").click()
+    page.locator("#asset-form [name='range']").fill("192.0.2.254 - 192.0.3.1")
+    page.locator("#asset-form [name='username']").fill("test-user")
+    page.locator("#asset-form [name='password']").fill("test-password")
+    page.locator("#save-asset").click()
+    page.locator("#asset-search").fill("192.0.")
+    expect(page.locator(".device-name")).to_have_count(6)
+    assert page.evaluate("app.data.assets.some(a=>a.host==='192.0.2.255') && app.data.assets.some(a=>a.host==='192.0.3.0')")
+    assert page.evaluate("""async()=>{const before=app.data.assets.length;let refused=false;try{await app.call('add_range',{range:'10.0.0.0-10.0.16.0'});}catch(e){refused=true;}return refused&&before===app.data.assets.length;}""")
+    check("CIDR and full cross-subnet ranges, inclusive .0/.255, pre-expansion limit")
 
     page.locator("[data-nav='settings']").click()
+    page.evaluate("""() => {
+      app.data.commands.huawei=[{command:'show version',enabled:false},{command:'display cpu-usage',enabled:true}];app.render();
+    }""")
+    panel=page.locator('[data-command-panel="huawei"]')
+    panel.locator('.command-input').first.fill('show interface brief')
+    panel.locator('[data-command-supplement]').click()
+    expect(panel.locator('.command-input')).to_have_count(8)
+    expect(panel.locator('.command-input').first).to_have_value('show interface brief')
+    expect(panel.locator('.command-enabled input').first).not_to_be_checked()
+    assert page.evaluate("app.data.commands.huawei.length") == 2
+    panel.locator('[data-command-supplement]').click()
+    expect(panel.locator('.command-input')).to_have_count(8)
+    panel.locator('[data-command-save]').click()
+    assert page.evaluate("app.data.commands.huawei.length") == 8
+    check("supplement analysis commands preserves unsaved edits and disabled states until save")
     page.locator("#settings-form [name='workers']").fill("3")
     page.locator("#settings-form [name='group']").fill("测试默认分组")
     page.locator("#settings-form [type='submit']").click()
@@ -126,18 +156,46 @@ with sync_playwright() as playwright:
     page.locator("#confirm-start").click()
     page.wait_for_function("app.data.run.state === 'done'", timeout=20000)
     expect(page.locator(".task-card")).to_contain_text("已完成")
+    page.evaluate("""() => {
+        Object.assign(app.data.run.consoles[0], {transport:'telnet',status:'fail',
+            output:'SSH 登录失败，正在尝试同端口 Telnet (2000)',error:'Telnet 认证失败'});
+        app.render();
+    }""")
+    expect(page.locator(".console-thread").first).to_contain_text("TELNET")
+    expect(page.locator(".console-pane").first.locator(".result-error")).to_have_text("Telnet 认证失败")
     check("session preferences, inspection launch, cancellation, restart and completion")
 
     page.locator("[data-nav='reports']").click()
     expect(page.locator(".archive-table tbody tr")).to_have_count(3)
-    page.locator("[data-report]").first.click()
-    expect(page.locator("#modal")).to_contain_text("示例巡检报告")
-    page.keyboard.press("Escape")
-    page.locator("[data-folder]").first.click()
+    page.locator('[data-report="demo-run"]').click()
+    expect(page.locator('.inspection-report')).to_be_visible()
+    expect(page.locator('.report-summary tbody tr')).to_have_count(12)
+    expect(page.locator('.report-charts>section')).to_have_count(4)
+    expect(page.locator('.report-device[open]')).to_have_count(0)
+    page.locator('[data-report-filter="status"]').select_option('fail')
+    expect(page.locator('.report-summary tbody tr:visible')).to_have_count(1)
+    page.locator('[data-report-filter="status"]').select_option('')
+    page.locator('[data-report-filter="group"]').select_option('总部 · 核心网络')
+    expect(page.locator('.report-summary tbody tr:visible')).to_have_count(4)
+    page.locator('[data-report-search]').fill('HQ-AGG-SW01')
+    expect(page.locator('.report-summary tbody tr:visible')).to_have_count(1)
+    page.locator('.report-summary tbody tr:visible [data-report-jump]').click()
+    expect(page.locator('.report-device[open]')).to_have_count(1)
+    expect(page.locator('.report-device[open]')).to_contain_text('本次读取范围')
+    page.locator('[data-report-search]').fill('no-such-device')
+    expect(page.locator('[data-report-empty]')).to_be_visible()
+    page.locator('[data-report-search]').fill('')
+    page.locator('[data-report-filter="group"]').select_option('')
+    page.locator('#report-select').select_option(index=0)
+    expect(page.locator('#report-view')).to_contain_text('演示任务记录')
+    page.locator('[data-demo-sample]').click()
+    expect(page.locator('.inspection-report')).to_be_visible()
+    page.locator('[data-folder]').first.click()
     expect(page.locator("#modal")).to_contain_text("示例归档结构")
     page.keyboard.press("Escape")
+    page.locator('.report-device[open]').evaluate_all('(els)=>els.forEach(el=>el.open=false)')
     page.screenshot(path=str(ROOT / "reports-preview.png"), full_page=True)
-    check("report history, report summary and archive structure")
+    check("report charts, history switch, search/status/group filters, jump/expand and archive structure")
 
     for width, height in [(1920,1080),(1480,1040),(1280,800),(1024,768),(980,680)]:
         page.set_viewport_size({"width":width,"height":height})
@@ -153,6 +211,21 @@ with sync_playwright() as playwright:
     assert page.evaluate("matchMedia('(prefers-reduced-motion: reduce)').matches")
     assert not errors, errors
     check("all five pages at five supported desktop sizes, reduced motion, no JavaScript errors")
+
+    bulk = browser.new_page(viewport={"width":1480,"height":940})
+    bulk.goto("http://127.0.0.1:8767/?demo=1#assets")
+    bulk.wait_for_function("app.initialized")
+    bulk.evaluate("""async()=>{
+      await app.call('add_range',{range:'198.18.0.0-198.18.1.43',port:2000,vendor:'',group:'批量测试'});
+      app.render();
+    }""")
+    bulk.locator('#asset-search').fill('198.18.')
+    expect(bulk.locator('.device-name')).to_have_count(300)
+    assert bulk.locator('#table-inner .table-scroll').evaluate('(el)=>el.scrollHeight>el.clientHeight')
+    counts=bulk.evaluate("app.call('add_range',{range:'198.18.1.40 - 45',port:2000,vendor:'',group:'批量测试'})")
+    assert counts=={'ok':True,'added':2,'skipped':4}
+    bulk.close()
+    check("300 filtered assets render together with vertical scrolling and range duplicate skipping")
 
     # A clean real-workspace response must render empty, and must never seed sample assets.
     clean = browser.new_page(viewport={"width":1480,"height":1040})

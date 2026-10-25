@@ -58,7 +58,7 @@ def eval_temp(readings):
         return "unk"
     if any(r.get("abnormal") for r in readings):
         return "crit"
-    mx = max((r["temp"] for r in readings if isinstance(r.get("temp"), int)), default=None)
+    mx = max((r["temp"] for r in readings if isinstance(r.get("temp"), (int, float))), default=None)
     if mx is None:
         return "unk"
     if mx >= TEMP_CRIT:
