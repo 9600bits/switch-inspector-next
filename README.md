@@ -1,6 +1,12 @@
-# Switch Inspector Next
+# 交换机巡检工具 Switch Inspector Next
 
 Switch Inspector Next 是一个面向 Windows 桌面环境的交换机巡检工具，支持通过 SSH 或 Telnet 巡检华为 VRP 和 H3C Comware 设备。
+
+## 最新版本
+
+当前发行版：**v1.1.0**。可在 [GitHub Releases](https://github.com/9600bits/switch-inspector-next/releases/latest) 查看更新说明并下载 Windows 程序：
+
+[下载 SwitchInspectorNext.exe](https://github.com/9600bits/switch-inspector-next/releases/download/v1.1.0/SwitchInspectorNext.exe)
 
 ## 功能
 
